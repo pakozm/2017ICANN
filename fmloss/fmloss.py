@@ -11,8 +11,8 @@ np.random.seed(1337)  # for reproducibility
 
 from keras.callbacks import EarlyStopping
 from keras.datasets import mnist
-from keras.models import Sequential
-from keras.layers import Dense, Dropout, Activation, Flatten
+from keras.models import Model, Sequential, load_model
+from keras.layers import Input, Dense, Dropout, Activation, Flatten
 from keras.layers import Convolution2D, MaxPooling2D
 from keras.regularizers import l2, activity_l2
 from keras.utils import np_utils
@@ -21,12 +21,13 @@ from keras import backend as K
 sys.path.append('.')
 from datasets import bioassay as ds_module
 
+def macro_fm(y_true, y_pred, beta=1.0):
+    beta2 = beta**2.0
+    top = K.sum(y_true * y_pred, axis=0)
+    bot = beta2 * K.sum(y_true, axis=0) + K.sum(y_pred, axis=0)
+    return -(1.0 + beta2) * K.mean(top/bot)
+
 def macro_avg_fm_loss(beta=1.0):
-    def macro_fm(y_true, y_pred):
-        beta2 = beta**2.0
-        top = K.sum(y_true * y_pred, axis=0)
-        bot = beta2 * K.sum(y_true, axis=0) + K.sum(y_pred, axis=0)
-        return -(1.0 + beta2) * K.mean(top/bot)
     return macro_fm
 
 def micro_avg_fm_loss(beta=1.0):
@@ -71,8 +72,6 @@ if nb_classes > 2:
     Y_train = np_utils.to_categorical(Y_train, nb_classes)
     Y_test = np_utils.to_categorical(Y_test, nb_classes)
 
-model = Sequential()
-
 # model.add(Convolution2D(nb_filters, kernel_size[0], kernel_size[1],
 #                         border_mode='valid',
 #                         input_shape=input_shape))
@@ -82,26 +81,54 @@ model = Sequential()
 # model.add(MaxPooling2D(pool_size=pool_size))
 # model.add(Dropout(0.25))
 
-# model.add(Flatten())
-model.add(Dense(128, input_shape=input_shape, W_regularizer=l2(0.01)))
-model.add(Activation('relu'))
-model.add(Dropout(0.5))
-model.add(Dense(128, W_regularizer=l2(0.01)))
-model.add(Activation('relu'))
-model.add(Dropout(0.5))
-model.add(Dense(128, W_regularizer=l2(0.01)))
-model.add(Activation('relu'))
-model.add(Dropout(0.5))
+#model = Sequential()
+#model.add(Flatten())
+#model.add(Dense(128, input_shape=input_shape, W_regularizer=l2(0.01)))
+#model.add(Activation('relu'))
+#model.add(Dropout(0.5))
+#model.add(Dense(128, W_regularizer=l2(0.01)))
+#model.add(Activation('relu'))
+#model.add(Dropout(0.5))
+#model.add(Dense(128, W_regularizer=l2(0.01)))
+#model.add(Activation('relu'))
+#model.add(Dropout(0.5))
+#if nb_classes > 2:
+#    model.add(Dense(nb_classes, W_regularizer=l2(0.01)))
+#    model.add(Activation('softmax'))
+#else:
+#    model.add(Dense(1, W_regularizer=l2(0.01)))
+#    model.add(Activation('sigmoid'))
+
+print(input_shape)
+outputs = inputs = Input(input_shape)
+# outputs = Flatten()(inputs)
+outputs = Dense(128, input_shape=input_shape, W_regularizer=l2(0.01))(outputs)
+outputs = Activation('relu')(outputs)
+outputs = Dropout(0.5)(outputs)
+outputs = Dense(128, W_regularizer=l2(0.01))(outputs)
+outputs = Activation('relu')(outputs)
+outputs = Dropout(0.5)(outputs)
+outputs = Dense(128, W_regularizer=l2(0.01))(outputs)
+outputs = Activation('relu')(outputs)
+outputs = Dropout(0.5)(outputs)
 if nb_classes > 2:
-    model.add(Dense(nb_classes, W_regularizer=l2(0.01)))
-    model.add(Activation('softmax'))
+    ouptuts = Dense(nb_classes, W_regularizer=l2(0.01))(outputs)
+    outputs = Activation('softmax')(outputs)
 else:
-    model.add(Dense(1, W_regularizer=l2(0.01)))
-    model.add(Activation('sigmoid'))
+    outputs = Dense(1, W_regularizer=l2(0.01))(outputs)
+    outputs = Activation('sigmoid')(outputs)
+
+model = Model(input=inputs, output=outputs)
 
 model.compile(loss=macro_avg_fm_loss(beta=1.0), # 'binary_crossentropy',
               optimizer='adadelta',
               metrics=['accuracy', 'fbeta_score'])
+
+model.save("/tmp/jarl.mdl")
+
+del model
+
+model = load_model("/tmp/jarl.mdl", custom_objects={"macro_fm": macro_fm})
 
 #early_stopping = EarlyStopping(monitor='val_loss', min_delta=0,
 #                               patience=10, verbose=1, mode='min')
