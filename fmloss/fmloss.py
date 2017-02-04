@@ -1,14 +1,12 @@
-'''Trains a simple convnet on the MNIST dataset.
-Gets to 99.25% test accuracy after 12 epochs
-(there is still a lot of margin for parameter tuning).
-16 seconds per epoch on a GRID K520 GPU.
-'''
+"""
+"""
 from __future__ import print_function
 
 import sys
 import numpy as np
 np.random.seed(1337)  # for reproducibility
 
+from sklearn.model_selection import train_test_split
 from keras.callbacks import EarlyStopping
 from keras.datasets import mnist
 from keras.models import Model, Sequential, load_model
@@ -27,43 +25,52 @@ def macro_fm(y_true, y_pred, beta=1.0):
     bot = beta2 * K.sum(y_true, axis=0) + K.sum(y_pred, axis=0)
     return -(1.0 + beta2) * K.mean(top/bot)
 
-def macro_avg_fm_loss(beta=1.0):
-    return macro_fm
+def micro_fm(y_true, y_pred):
+    """Used with softmax this is equivalent to accuracy
 
-def micro_avg_fm_loss(beta=1.0):
+    Two other commonly used F measures are the F2, which weighs recall
+    higher than precision (by placing more emphasis on false negatives),
+    and the F0.5, which weighs recall lower than precision (by
+    attenuating the influence of false negatives).
     """
-    
-    Used with softmax this is equivalent to accuracy
-    """
-    def micro_fm(y_true, y_pred):
-        beta2 = beta**2.0
-        top = K.sum(y_true * y_pred)
-        bot = beta2 * K.sum(y_true) + K.sum(y_pred)
-        return -(1.0 + beta2) * top / bot
-    return micro_fm
+    beta = 0.5
+    beta2 = beta**2.0
+    top = K.sum(y_true * y_pred)
+    bot = beta2 * K.sum(y_true) + K.sum(y_pred)
+    return -(1.0 + beta2) * top / bot
+
+
+use_fm = True
+standardize = True
 
 # the data, shuffled and split between train and test sets
-(X_train, Y_train), (X_test, Y_test) = ds_module.load_data(idx=2)
+(X_train, Y_train), (X_test, Y_test) = ds_module.load_data(idx=20)
 
-batch_size = 128
 nb_classes = len(np.unique(Y_train))
-nb_epoch = 200
+nb_epoch = 2000
+wdecay = 0.000
 
 X_train = X_train.astype('float32')
 X_test = X_test.astype('float32')
 
-X_mean = np.mean(X_train , axis=0)
-X_std = np.std(X_train , axis=0)
-X_std[X_std == 0.0] = 1.0
-X_inv_std=1.0 / X_std
+if standardize:
+    X_mean = np.mean(X_train , axis=0)
+    X_std = np.std(X_train , axis=0)
+    X_std[X_std == 0.0] = 1.0
+    X_inv_std=1.0 / X_std
 
-X_train = (X_train - X_mean) * X_inv_std
-X_test = (X_test - X_mean) * X_inv_std
+    X_train = (X_train - X_mean) * X_inv_std
+    X_test = (X_test - X_mean) * X_inv_std
 
 print('X_train shape:', X_train.shape)
+print('Y_train shape:', Y_train.shape)
 print('num classes:', nb_classes)
 print(X_train.shape[0], 'train samples')
 print(X_test.shape[0], 'test samples')
+imbalance = np.sum(Y_train)/float(len(Y_train))
+print('imbalance:', imbalance)
+batch_size = min(len(Y_train), max(128, int(2.0/imbalance)))
+print('batch_size:', batch_size)
 
 input_shape = X_train.shape[1:]
 
@@ -72,72 +79,62 @@ if nb_classes > 2:
     Y_train = np_utils.to_categorical(Y_train, nb_classes)
     Y_test = np_utils.to_categorical(Y_test, nb_classes)
 
-# model.add(Convolution2D(nb_filters, kernel_size[0], kernel_size[1],
-#                         border_mode='valid',
-#                         input_shape=input_shape))
-# model.add(Activation('relu'))
-# model.add(Convolution2D(nb_filters, kernel_size[0], kernel_size[1]))
-# model.add(Activation('relu'))
-# model.add(MaxPooling2D(pool_size=pool_size))
-# model.add(Dropout(0.25))
-
-#model = Sequential()
-#model.add(Flatten())
-#model.add(Dense(128, input_shape=input_shape, W_regularizer=l2(0.01)))
-#model.add(Activation('relu'))
-#model.add(Dropout(0.5))
-#model.add(Dense(128, W_regularizer=l2(0.01)))
-#model.add(Activation('relu'))
-#model.add(Dropout(0.5))
-#model.add(Dense(128, W_regularizer=l2(0.01)))
-#model.add(Activation('relu'))
-#model.add(Dropout(0.5))
-#if nb_classes > 2:
-#    model.add(Dense(nb_classes, W_regularizer=l2(0.01)))
-#    model.add(Activation('softmax'))
-#else:
-#    model.add(Dense(1, W_regularizer=l2(0.01)))
-#    model.add(Activation('sigmoid'))
-
-print(input_shape)
 outputs = inputs = Input(input_shape)
-# outputs = Flatten()(inputs)
-outputs = Dense(128, input_shape=input_shape, W_regularizer=l2(0.01))(outputs)
+outputs = Dense(128, input_shape=input_shape, W_regularizer=l2(wdecay))(outputs)
 outputs = Activation('relu')(outputs)
 outputs = Dropout(0.5)(outputs)
-outputs = Dense(128, W_regularizer=l2(0.01))(outputs)
+outputs = Dense(128, W_regularizer=l2(wdecay))(outputs)
 outputs = Activation('relu')(outputs)
 outputs = Dropout(0.5)(outputs)
-outputs = Dense(128, W_regularizer=l2(0.01))(outputs)
-outputs = Activation('relu')(outputs)
-outputs = Dropout(0.5)(outputs)
+#outputs = Dense(128, W_regularizer=l2(wdecay))(outputs)
+#outputs = Activation('relu')(outputs)
+#outputs = Dropout(0.5)(outputs)
 if nb_classes > 2:
-    ouptuts = Dense(nb_classes, W_regularizer=l2(0.01))(outputs)
+    ouptuts = Dense(nb_classes, W_regularizer=l2(wdecay))(outputs)
     outputs = Activation('softmax')(outputs)
 else:
-    outputs = Dense(1, W_regularizer=l2(0.01))(outputs)
+    outputs = Dense(1, W_regularizer=l2(wdecay))(outputs)
     outputs = Activation('sigmoid')(outputs)
-
 model = Model(input=inputs, output=outputs)
 
-model.compile(loss=macro_avg_fm_loss(beta=1.0), # 'binary_crossentropy',
-              optimizer='adadelta',
+print(model.summary())
+
+if use_fm:
+    loss = micro_fm
+else:
+    loss = 'binary_crossentropy'
+model.compile(loss=loss, optimizer='adam',
               metrics=['accuracy', 'fbeta_score'])
 
-model.save("/tmp/jarl.mdl")
-
-del model
-
-model = load_model("/tmp/jarl.mdl", custom_objects={"macro_fm": macro_fm})
+#model.save("/tmp/jarl.mdl")
+#del model
+#model = load_model("/tmp/jarl.mdl",
+#                   custom_objects={"macro_fm": macro_fm,
+#                                   "micro_fm": micro_fm})
 
 #early_stopping = EarlyStopping(monitor='val_loss', min_delta=0,
 #                               patience=10, verbose=1, mode='min')
 
+#x_tr, x_va, y_tr, y_va = train_test_split(X_train, Y_train,
+#                                          random_state=87654321,
+#                                          stratify=Y_train,
+#                                          test_size=0.3)
+
 model.fit(X_train, Y_train, batch_size=batch_size,
           nb_epoch=nb_epoch, verbose=1, validation_split=0.3)
 
-# callbacks=[early_stopping])
-# validation_data=(X_test, Y_test)
+# num_batches = 10
+# for i in range(nb_epoch):
+#     tr_losses = []
+#     for j in range(num_batches):
+#         batch_idx = np.random.randint(0, len(x_tr), batch_size)
+#         x_train_batch = x_tr[batch_idx, :]
+#         y_train_batch = y_tr[batch_idx]
+#         tr_losses.append(model.train_on_batch(x_train_batch,
+#                                               y_train_batch))
+#     tr_loss = np.mean(tr_losses, axis=0)
+#     va_loss = model.evaluate(x_va, y_va, verbose=2)
+#     print(i, tr_loss.tolist(), 'val', va_loss)
 
 score = model.evaluate(X_test, Y_test, verbose=0)
 print('Test scores:', score)
