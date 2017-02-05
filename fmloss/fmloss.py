@@ -32,8 +32,13 @@ def micro_fm(y_true, y_pred):
     higher than precision (by placing more emphasis on false negatives),
     and the F0.5, which weighs recall lower than precision (by
     attenuating the influence of false negatives).
+
+    With beta = 1, this is equivalent to a F-measure. With beta < 1,
+    assigning correct classes becomes more important, and with beta >
+    1 the metric is instead weighted towards penalizing incorrect
+    class assignments.
     """
-    beta = 0.5
+    beta = 0.1
     beta2 = beta**2.0
     top = K.sum(y_true * y_pred)
     bot = beta2 * K.sum(y_true) + K.sum(y_pred)
@@ -47,7 +52,7 @@ standardize = True
 (X_train, Y_train), (X_test, Y_test) = ds_module.load_data(idx=20)
 
 nb_classes = len(np.unique(Y_train))
-nb_epoch = 2000
+nb_epoch = 20000
 wdecay = 0.000
 
 X_train = X_train.astype('float32')
